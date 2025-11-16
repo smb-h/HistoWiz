@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>HistoWiz</title>
+  <link rel="icon" href="favicon.png">
+  <style>
+    :root{--ui-bg:#0f1724;--card:#0b1220;--muted:#94a3b8;--accent:#60a5fa}
+    html,body{height:100%;margin:0;font-family:Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;color:#e6eef8;background:linear-gradient(180deg,#061024 0%, #0b1220 100%);overflow:hidden}
+    /* layout */
+    nav{height:56px;background:rgba(255,255,255,0.02);display:flex;align-items:center;gap:12px;padding:0 12px;border-bottom:1px solid rgba(255,255,255,0.02);box-sizing:border-box}
+    nav img.logo{height:34px;width:34px;border-radius:6px}
+    nav .title{font-weight:600}
+
+    .page{display:flex;flex-direction:column;height:100vh;box-sizing:border-box}
+    /* remove horizontal padding so .wrap can use full viewport width */
+    .content{padding:0;box-sizing:border-box;flex:1;display:flex;overflow:hidden}
+
+    /* use minmax(0,1fr) to ensure left column can shrink properly and take full remaining width */
+    .wrap{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:12px;box-sizing:border-box;height:100%;align-items:stretch;width:100%}
+    .card{background:rgba(255,255,255,0.03);border-radius:12px;padding:12px;box-shadow:0 6px 18px rgba(2,6,23,0.6);display:flex;flex-direction:column;align-items:stretch;overflow:hidden}
+
+    header{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+    header h1{font-size:16px;margin:0}
+    .left{display:flex;flex-direction:column;gap:12px}
+
+    /* canvas area - now stretch to fill left column */
+    #canvasWrap{flex:1;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.00));border-radius:8px;padding:8px;box-sizing:border-box;overflow:hidden}
+    canvas#imgCanvas{max-width:100%;max-height:100%;width:auto;height:auto;border-radius:6px;background:#111;display:block}
+
+    .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .btn{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 10px;border-radius:8px;color:var(--muted);cursor:pointer}
+    .btn:hover{border-color:rgba(255,255,255,0.12);color:#fff}
+    input[type=file]{display:none}
+
+    .right{width:360px;min-width:280px}
+    .graph-area{height:380px;display:flex;flex-direction:column;gap:10px}
+    .graph-canvas{flex:1;border-radius:8px;background:linear-gradient(180deg,#071125 0%, #07101a 100%);padding:10px;box-sizing:border-box;border:1px solid rgba(255,255,255,0.03);overflow:hidden}
+    svg{width:100%;height:100%;touch-action:none}
+
+    .hint{font-size:12px;color:var(--muted)}
+    .small{font-size:12px;color:var(--muted)}
+    .hist{height:80px;background:rgba(255,255,255,0.02);border-radius:6px;overflow:hidden}
+    .footer{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+    .reset{color:#fca5a5}
+    .export{color:#a7f3d0}
+    .point{cursor:pointer}
+
+    footer.sitefoot{height:56px;background:transparent;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;border-top:1px solid rgba(255,255,255,0.02)}
+
+    /* responsive: stack on small screens */
+    @media (max-width:980px){
+      .wrap{grid-template-columns:1fr;grid-auto-rows: auto}
+      .right{width:100%}
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <nav>
+      <!-- place favicon.png alongside this HTML file -->
+      <img class="logo" src="favicon.png" alt="logo">
+      <div style="display:flex;flex-direction:column">
+        <div class="title">HistoWiz</div>
+        <div class="small">By SMBH</div>
+      </div>
+    </nav>
+
+    <div class="content">
+      <div class="wrap">
+        <div class="card left">
+          <header>
+            <h1>Histogram Equalization Wizard</h1>
+            <div class="hint">Load an image — drag graph points on the right to change transfer.</div>
+          </header>
+          <div class="controls">
+            <label class="btn" for="fileInput">Choose Image</label>
+            <input id="fileInput" type="file" accept="image/*">
+            <button id="resetMap" class="btn">Reset to identity</button>
+            <button id="autoEqualize" class="btn">Auto histogram equalize</button>
+            <button id="download" class="btn">Download result</button>
+          </div>
+
+          <div id="canvasWrap">
+            <canvas id="imgCanvas" width="600" height="400"></canvas>
+          </div>
+
+          <div class="small hint" style="margin-top:8px">Stateless. Works on modern browsers.</div>
+        </div>
+
+        <div class="card right">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <strong>Transfer Curve (y = x initially)</strong>
+            <div class="small">Drag points to modify mapping — changes apply live</div>
+          </div>
+          <div class="graph-area">
+            <div class="graph-canvas">
+              <svg id="transferSVG" viewBox="0 0 260 260" preserveAspectRatio="none">
+                <rect x="0" y="0" width="260" height="260" fill="transparent"></rect>
+                <!-- axes -->
+                <g id="axes">
+                  <line x1="20" y1="240" x2="240" y2="240" stroke="rgba(255,255,255,0.06)"/>
+                  <line x1="20" y1="240" x2="20" y2="20" stroke="rgba(255,255,255,0.06)"/>
+                </g>
+                <g id="curveGroup"></g>
+              </svg>
+            </div>
+            <div class="hist" id="histogramBar"></div>
+          </div>
+          <div class="footer">
+            <div class="small">Points: <span id="pointCount">4</span></div>
+            <div>
+              <button class="btn" id="addPoint">+ Add point</button>
+              <button class="btn" id="removePoint">- Remove point</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="sitefoot">
+      © <span id="year"></span> &nbsp HistoWiz • All rights reserved
+    </footer>
+  </div>
+
+<script>
+// set footer year automatically
+document.getElementById('year').textContent = new Date().getFullYear();
+
+// Utilities
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+// DOM
+const fileInput=document.getElementById('fileInput');
+const canvas=document.getElementById('imgCanvas');
+const canvasWrap=document.getElementById('canvasWrap');
+const ctx=canvas.getContext('2d');
+const svg=document.getElementById('transferSVG');
+const curveGroup=document.getElementById('curveGroup');
+const histBar=document.getElementById('histogramBar');
+const resetBtn=document.getElementById('resetMap');
+const autoEqualizeBtn=document.getElementById('autoEqualize');
+const downloadBtn=document.getElementById('download');
+const addPointBtn=document.getElementById('addPoint');
+const removePointBtn=document.getElementById('removePoint');
+const pointCountSpan=document.getElementById('pointCount');
+
+let img = new Image();
+let originalImageData = null; // keep in memory (this will be the possibly scaled image placed into canvas)
+let lut = new Uint8ClampedArray(256);
+
+// Default control points (normalized 0..1) for identity y=x
+let controlPoints = [ {x:0,y:0}, {x:0.33,y:0.33}, {x:0.66,y:0.66}, {x:1,y:1} ];
+
+function drawSVGCurve(){
+  // clear
+  while(curveGroup.firstChild) curveGroup.removeChild(curveGroup.firstChild);
+  // create polyline path and points
+  const w=220, h=220, ox=20, oy=20; // svg inner box 20..240
+  // draw grid lines
+  for(let i=0;i<=4;i++){
+    const y=oy+i*(h/4);
+    const line=document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1',ox);line.setAttribute('x2',ox+h);line.setAttribute('y1',y);line.setAttribute('y2',y);
+    line.setAttribute('stroke','rgba(255,255,255,0.02)');curveGroup.appendChild(line);
+  }
+
+  // sort by x
+  controlPoints.sort((a,b)=>a.x-b.x);
+  pointCountSpan.textContent = controlPoints.length;
+  // build path
+  let pathD='';
+  for(let i=0;i<controlPoints.length;i++){
+    const p=controlPoints[i];
+    const sx=ox + p.x * w;
+    const sy=oy + (1-p.y) * h;
+    if(i===0) pathD += `M ${sx} ${sy}`; else pathD += ` L ${sx} ${sy}`;
+  }
+  // polyline path
+  const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+  path.setAttribute('d',pathD);
+  path.setAttribute('fill','none');
+  path.setAttribute('stroke','rgba(96,165,250,0.9)');
+  path.setAttribute('stroke-width','2');
+  curveGroup.appendChild(path);
+
+  // draw points
+  controlPoints.forEach((p,idx)=>{
+    const sx=ox + p.x * w;
+    const sy=oy + (1-p.y) * h;
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('class','point');
+    g.setAttribute('data-idx',idx);
+    const circle=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    circle.setAttribute('cx',sx);circle.setAttribute('cy',sy);circle.setAttribute('r',6);
+    circle.setAttribute('fill','white');circle.setAttribute('opacity',0.95);
+    circle.setAttribute('stroke','rgba(0,0,0,0.6)');circle.setAttribute('stroke-width',1);
+    g.appendChild(circle);
+    // label small
+    const lab=document.createElementNS('http://www.w3.org/2000/svg','text');
+    lab.setAttribute('x',sx+8);lab.setAttribute('y',sy-8);lab.setAttribute('font-size',10);lab.setAttribute('fill','rgba(255,255,255,0.6)');
+    lab.textContent = `${Math.round(p.x*255)}→${Math.round(p.y*255)}`;
+    g.appendChild(lab);
+    curveGroup.appendChild(g);
+  });
+}
+
+let drag = null;
+svg.addEventListener('pointerdown', (ev)=>{
+  const pt = getSVGPoint(ev);
+  const ox=20, oy=20, w=220, h=220;
+  // find nearest point
+  let found=null; let minD=12;
+  controlPoints.forEach((p,idx)=>{
+    const sx=ox + p.x * w;const sy=oy + (1-p.y) * h;
+    const d=Math.hypot(sx-pt.x, sy-pt.y);
+    if(d<minD){found={idx, sx, sy};minD=d;}
+  });
+  if(found){
+    drag={idx:found.idx, offX: pt.x - (20 + controlPoints[found.idx].x*w), offY: pt.y - (20 + (1-controlPoints[found.idx].y)*h)};
+    svg.setPointerCapture(ev.pointerId);
+  }
+});
+svg.addEventListener('pointermove', (ev)=>{
+  if(!drag) return;
+  const pt = getSVGPoint(ev);
+  const ox=20, oy=20, w=220, h=220;
+  let nx = (pt.x - ox - drag.offX) / w; nx = clamp(nx,0,1);
+  let ny = 1 - ((pt.y - oy - drag.offY) / h); ny = clamp(ny,0,1);
+  // enforce first and last fixed at 0 and 1? allow moving interior but keep monotonicity
+  if(drag.idx===0){ nx=0; }
+  if(drag.idx===controlPoints.length-1){ nx=1; }
+  // ensure monotonic x
+  const left = drag.idx>0 ? controlPoints[drag.idx-1].x : -Infinity;
+  const right = drag.idx<controlPoints.length-1 ? controlPoints[drag.idx+1].x : Infinity;
+  nx = clamp(nx, left, right);
+  controlPoints[drag.idx].x = nx;
+  controlPoints[drag.idx].y = ny;
+  drawSVGCurve();
+  updateLUTAndApply();
+});
+svg.addEventListener('pointerup', (ev)=>{ if(drag){ svg.releasePointerCapture(ev.pointerId); drag=null; }});
+svg.addEventListener('pointercancel', ()=>{drag=null});
+
+function getSVGPoint(ev){
+  const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY; const ctm = svg.getScreenCTM().inverse(); const sp = pt.matrixTransform(ctm); return {x:sp.x, y:sp.y};
+}
+
+function buildLUTFromControl(){
+  // piecewise linear interpolation over 0..255
+  controlPoints.sort((a,b)=>a.x-b.x);
+  if(controlPoints[0].x !== 0){ controlPoints.unshift({x:0,y:controlPoints[0].y}); }
+  if(controlPoints[controlPoints.length-1].x !== 1){ controlPoints.push({x:1,y:controlPoints[controlPoints.length-1].y}); }
+  for(let i=0;i<256;i++){
+    const t = i/255;
+    let j=0; while(j<controlPoints.length-1 && t>controlPoints[j+1].x) j++;
+    const a=controlPoints[j], b=controlPoints[j+1];
+    const local = (t - a.x) / (b.x - a.x || 1e-6);
+    const val = a.y + local * (b.y - a.y);
+    lut[i] = Math.round(clamp(val,0,1)*255);
+  }
+}
+
+function applyLUTToImage(){
+  if(!originalImageData) return;
+  const w=originalImageData.width, h=originalImageData.height;
+  const src = originalImageData.data;
+  const out = new Uint8ClampedArray(src.length);
+  for(let i=0;i<src.length;i+=4){
+    const r=src[i]/255, g=src[i+1]/255, b=src[i+2]/255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b);
+    let h_, s, l=(max+min)/2;
+    if(max===min){ h_=0; s=0; } else {
+      const d=max-min; s = l>0.5? d/(2-max-min): d/(max+min);
+      switch(max){ case r: h_ = (g-b)/d + (g<b?6:0); break; case g: h_ = (b-r)/d + 2; break; case b: h_ = (r-g)/d + 4; break; }
+      h_ /= 6;
+    }
+    const mappedL = lut[Math.round(l*255)]/255;
+    let rr,gg,bb;
+    if(s===0){ rr=gg=bb=mappedL; } else {
+      const q = mappedL < 0.5 ? mappedL * (1 + s) : mappedL + s - mappedL * s;
+      const p = 2 * mappedL - q;
+      rr = hue2rgb(p,q,h_ + 1/3);
+      gg = hue2rgb(p,q,h_);
+      bb = hue2rgb(p,q,h_ - 1/3);
+    }
+    out[i] = Math.round(rr*255);
+    out[i+1] = Math.round(gg*255);
+    out[i+2] = Math.round(bb*255);
+    out[i+3] = src[i+3];
+  }
+  const newImg = new ImageData(out,w,h);
+  ctx.putImageData(newImg, 0, 0);
+}
+
+function hue2rgb(p,q,t){ if(t<0) t+=1; if(t>1) t-=1; if(t<1/6) return p + (q-p)*6*t; if(t<1/2) return q; if(t<2/3) return p + (q-p)*(2/3 - t)*6; return p; }
+
+function updateLUTAndApply(){ buildLUTFromControl(); updateHistogramPreview(); applyLUTToImage(); }
+
+function updateHistogramPreview(){
+  if(!originalImageData) return;
+
+  // compute original luminance histogram
+  const origHist = new Uint32Array(256);
+  const data = originalImageData.data;
+  for(let i=0;i<data.length;i+=4){
+    const lum = Math.round( (0.2126*data[i] + 0.7152*data[i+1] + 0.0722*data[i+2]) );
+    origHist[lum]++;
+  }
+
+  // compute mapped luminance histogram using current lut
+  const mappedHist = new Uint32Array(256);
+  for(let i=0;i<data.length;i+=4){
+    const lum = Math.round( (0.2126*data[i] + 0.7152*data[i+1] + 0.0722*data[i+2]) );
+    const m = lut[lum];                 // mapped luminance (0..255)
+    mappedHist[m]++;
+  }
+
+  // normalization
+  const maxOrig = Math.max(...origHist) || 1;
+  const maxMapped = Math.max(...mappedHist) || 1;
+  const globalMax = Math.max(maxOrig, maxMapped);
+
+  // build HTML: for each small group of bins (step 4 like before) draw a wrapper with
+  // the original bar (muted) and the mapped bar overlay (accent)
+  let html = '<div style="display:flex;height:100%;align-items:flex-end;gap:0.5px">';
+  const step = 4; // same bin grouping as before
+  for(let i=0;i<256;i+=step){
+    const o = Math.round((origHist[i]/globalMax)*100);    // percent height original
+    const m = Math.round((mappedHist[i]/globalMax)*100);  // percent height mapped
+    // wrapper width larger so overlay is visible
+    html += `
+      <div style="width:4px;height:100%;position:relative;display:inline-block">
+        <div title="orig ${i}" style="
+            position:absolute;left:0;bottom:0;width:4px;height:${o}%;
+            background:rgba(255,255,255,0.12);border-radius:1px;">
+        </div>
+        <div title="mapped ${i}" style="
+            position:absolute;left:0.5px;bottom:0;width:2px;height:${m}%;
+            background:linear-gradient(180deg,rgba(96,165,250,0.95),rgba(96,165,250,0.5));
+            border-radius:1px;">
+        </div>
+      </div>
+    `;
+  }
+  html += '</div>';
+  histBar.innerHTML = html;
+}
+
+// file handling: scale image to fit the canvasWrap so no scrollbars appear
+fileInput.addEventListener('change', (e)=>{
+  const f = e.target.files[0]; if(!f) return;
+  const url = URL.createObjectURL(f);
+  img = new Image(); img.onload = ()=>{
+    // compute available size inside canvasWrap
+    const pad = 20; // account for canvasWrap padding
+    const availW = Math.max(100, canvasWrap.clientWidth - pad);
+    const availH = Math.max(100, canvasWrap.clientHeight - pad);
+    const scale = Math.min(availW / img.width, availH / img.height, 1);
+    const dw = Math.max(1, Math.round(img.width * scale));
+    const dh = Math.max(1, Math.round(img.height * scale));
+
+    // set canvas to scaled size so the drawn image always fits the view
+    canvas.width = dw; canvas.height = dh; canvas.style.width = dw + 'px'; canvas.style.height = dh + 'px';
+    // draw the (scaled) image to the canvas
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(img, 0, 0, dw, dh);
+    // capture the drawn pixels into originalImageData (this is what processing will use)
+    originalImageData = ctx.getImageData(0,0,canvas.width,canvas.height);
+
+    // reset control points and UI
+    controlPoints = [{x:0,y:0},{x:0.33,y:0.33},{x:0.66,y:0.66},{x:1,y:1}];
+    drawSVGCurve(); buildLUTFromControl(); updateHistogramPreview();
+  };
+  img.src = url;
+});
+
+resetBtn.addEventListener('click', ()=>{ controlPoints = [{x:0,y:0},{x:0.33,y:0.33},{x:0.66,y:0.66},{x:1,y:1}]; drawSVGCurve(); updateLUTAndApply(); });
+
+addPointBtn.addEventListener('click', ()=>{
+  controlPoints.push({x:0.5 + (Math.random()-0.5)*0.06, y:0.5 + (Math.random()-0.5)*0.06});
+  drawSVGCurve(); updateLUTAndApply();
+});
+removePointBtn.addEventListener('click', ()=>{
+  if(controlPoints.length>2){ controlPoints.splice(controlPoints.length-2,1); drawSVGCurve(); updateLUTAndApply(); }
+});
+
+autoEqualizeBtn.addEventListener('click', ()=>{
+  if(!originalImageData) return;
+  const hist=new Uint32Array(256);
+  const data=originalImageData.data;
+  for(let i=0;i<data.length;i+=4){ const lum = Math.round( (0.2126*data[i] + 0.7152*data[i+1] + 0.0722*data[i+2]) ); hist[lum]++; }
+  const cdf=new Float32Array(256); let cum=0; const total = (data.length/4) || 1;
+  for(let i=0;i<256;i++){ cum += hist[i]; cdf[i] = cum/total; }
+  const newCP = [];
+  newCP.push({x:0,y:0});
+  for(let x=0;x<=10;x++){
+    const t = x/10; let idx = 0; while(idx<256 && cdf[idx]<t) idx++;
+    newCP.push({x: idx/255, y: t});
+  }
+  newCP.push({x:1,y:1});
+  controlPoints = newCP;
+  drawSVGCurve(); updateLUTAndApply();
+});
+
+downloadBtn.addEventListener('click', ()=>{
+  const link = document.createElement('a'); link.download = 'mapped.png'; link.href = canvas.toDataURL('image/png'); link.click();
+});
+
+// if the window resizes, ensure the canvas stays within view by potentially re-scaling image
+window.addEventListener('resize', ()=>{
+  // if there's an original uploaded full-size image (img) re-fit it
+  if(!img || !img.src || !originalImageData) return;
+  // re-scale the base image to fit new container
+  const pad = 20; const availW = Math.max(100, canvasWrap.clientWidth - pad); const availH = Math.max(100, canvasWrap.clientHeight - pad);
+  const scale = Math.min(availW / img.width, availH / img.height, 1);
+  const dw = Math.max(1, Math.round(img.width * scale)); const dh = Math.max(1, Math.round(img.height * scale));
+  // redraw scaled original into canvas and update originalImageData
+  canvas.width = dw; canvas.height = dh; canvas.style.width = dw + 'px'; canvas.style.height = dh + 'px';
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(img, 0, 0, dw, dh);
+  originalImageData = ctx.getImageData(0,0,canvas.width,canvas.height);
+  updateLUTAndApply();
+});
+
+function init(){ drawSVGCurve(); buildLUTFromControl(); }
+init();
+
+</script>
+</body>
+</html>
